@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Env & secrets
+.env
+
+# Docker
+*.log
+
+# Data (jangan commit data mentah)
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# Airflow runtime files
+airflow/airflow.db
+airflow/logs/
+airflow/simple_auth_manager_passwords.json.generated
+airflow/webserver_config.py
+
+# dbt runtime files
+dbt_project/*/target/
+dbt_project/*/dbt_packages/
+dbt_project/*/logs/
+
+# Testing
+.pytest_cache/
+venv_test/
