@@ -1,0 +1,54 @@
+name: CI - Test Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-producer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        working-directory: producer
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        working-directory: producer
+        run: |
+          python -m pytest tests/ -v
+
+  test-spark-jobs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        working-directory: spark_jobs
+        run: |
+          pip install pyspark==3.5.3 pytest==8.3.3
+
+      - name: Run pytest
+        working-directory: spark_jobs
+        run: |
+          python -m pytest tests/ -v
