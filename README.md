@@ -1,6 +1,6 @@
 # IoT Weather Data Pipeline
 
-End-to-end data engineering pipeline yang mengambil data cuaca real-time, memprosesnya lewat arsitektur Bronze/Silver/Gold, dan menyajikannya sebagai star schema di data warehouse — dengan orchestration, data quality testing, dan CI/CD otomatis.
+End-to-end data engineering pipeline yang mengambil data cuaca real-time, memprosesnya lewat medallion architecture (Bronze/Silver), dan menyajikannya sebagai star schema di data warehouse. Dilengkapi orchestration, data quality testing, dan CI/CD otomatis.
 
 ## Arsitektur
 
