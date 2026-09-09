@@ -52,3 +52,76 @@ jobs:
         working-directory: spark_jobs
         run: |
           python -m pytest tests/ -v
+
+  test-dbt:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: iot_user
+          POSTGRES_PASSWORD: iot_pass123
+          POSTGRES_DB: iot_warehouse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dbt
+        working-directory: dbt_project
+        run: |
+          pip install "dbt-core<2.0" dbt-postgres==1.8.2
+
+      - name: Set up dbt profile
+        run: |
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          iot_analytics:
+            target: ci
+            outputs:
+              ci:
+                type: postgres
+                host: localhost
+                port: 5432
+                user: iot_user
+                pass: iot_pass123
+                dbname: iot_warehouse
+                schema: public
+                threads: 4
+          EOF
+
+      - name: Seed sample data
+        working-directory: dbt_project/iot_analytics
+        run: |
+          PGPASSWORD=iot_pass123 psql -h localhost -U iot_user -d iot_warehouse -c "
+          CREATE TABLE raw_weather_readings (
+            location_name VARCHAR, latitude FLOAT, longitude FLOAT,
+            temperature_c FLOAT, humidity_pct INT, wind_speed_kmh FLOAT,
+            precipitation_mm FLOAT, ingested_at TIMESTAMP
+          );
+          INSERT INTO raw_weather_readings VALUES
+            ('Depok', -6.4025, 106.7942, 30.0, 50, 5.0, 0.0, '2026-01-01 00:00:00'),
+            ('Jakarta', -6.2088, 106.8456, 29.0, 55, 4.0, 0.0, '2026-01-01 00:01:00');
+          "
+
+      - name: dbt deps
+        working-directory: dbt_project/iot_analytics
+        run: dbt deps
+
+      - name: dbt run
+        working-directory: dbt_project/iot_analytics
+        run: dbt run
+
+      - name: dbt test
+        working-directory: dbt_project/iot_analytics
+        run: dbt test
