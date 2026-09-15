@@ -1,7 +1,8 @@
 {{
     config(
         materialized='incremental',
-        unique_key='ingested_at || location_name'
+        unique_key=['ingested_at', 'location_name'],
+        incremental_strategy='merge'
     )
 }}
 
