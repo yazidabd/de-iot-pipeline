@@ -1,5 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
+import psycopg2
 
 SILVER_PATH = "../data/silver"
 
@@ -10,22 +11,65 @@ DB_PROPERTIES = {
     "driver": "org.postgresql.Driver",
 }
 TARGET_TABLE = "raw_weather_readings"
+STAGING_TABLE = "raw_weather_readings_staging"
+
+PG_CONN_PARAMS = {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "iot_warehouse",
+    "user": "iot_user",
+    "password": "iot_pass123",
+}
 
 
 def get_last_loaded_timestamp(spark) -> str | None:
-    """Cek 'batas air' terakhir: ingested_at paling baru yang SUDAH ada di Postgres.
-    Kalau tabel belum ada/kosong, balikin None (artinya load semua dari awal)."""
+    """Cek batas air terakhir: ingested_at paling baru yang sudah ada di Postgres."""
     try:
         result_df = spark.read.jdbc(
             url=JDBC_URL,
             table=f"(SELECT MAX(ingested_at) as max_ts FROM {TARGET_TABLE}) as t",
             properties=DB_PROPERTIES,
         )
-        max_ts = result_df.collect()[0]["max_ts"]
-        return max_ts
+        return result_df.collect()[0]["max_ts"]
     except Exception:
-        # Tabel belum ada sama sekali (baru pertama kali load)
         return None
+
+
+def upsert_staging_to_target() -> int:
+    """Pindahkan data dari staging ke target pakai UPSERT (ON CONFLICT DO UPDATE),
+    supaya proses ini aman dijalankan berkali-kali tanpa menghasilkan duplikat,
+    bahkan kalau run sebelumnya gagal di tengah jalan."""
+    conn = psycopg2.connect(**PG_CONN_PARAMS)
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"""
+                INSERT INTO {TARGET_TABLE} (
+                    location_name, latitude, longitude, temperature_c,
+                    humidity_pct, wind_speed_kmh, precipitation_mm, ingested_at
+                )
+                SELECT
+                    location_name, latitude, longitude, temperature_c,
+                    humidity_pct, wind_speed_kmh, precipitation_mm, ingested_at
+                FROM {STAGING_TABLE}
+                ON CONFLICT (location_name, ingested_at)
+                DO UPDATE SET
+                    latitude = EXCLUDED.latitude,
+                    longitude = EXCLUDED.longitude,
+                    temperature_c = EXCLUDED.temperature_c,
+                    humidity_pct = EXCLUDED.humidity_pct,
+                    wind_speed_kmh = EXCLUDED.wind_speed_kmh,
+                    precipitation_mm = EXCLUDED.precipitation_mm;
+            """)
+            row_count = cur.rowcount
+            cur.execute(f"DROP TABLE IF EXISTS {STAGING_TABLE};")
+        conn.commit()
+        return row_count
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def main() -> None:
@@ -48,15 +92,16 @@ def main() -> None:
         new_rows_df = silver_df
 
     new_count = new_rows_df.count()
-    print(f"New rows to append: {new_count}")
+    print(f"New rows to stage: {new_count}")
 
     if new_count > 0:
         (
             new_rows_df.write
-            .mode("append")
-            .jdbc(url=JDBC_URL, table=TARGET_TABLE, properties=DB_PROPERTIES)
+            .mode("overwrite")
+            .jdbc(url=JDBC_URL, table=STAGING_TABLE, properties=DB_PROPERTIES)
         )
-        print(f"Appended {new_count} new rows into {TARGET_TABLE}")
+        upserted = upsert_staging_to_target()
+        print(f"Upserted {upserted} rows into {TARGET_TABLE}")
     else:
         print("Nothing new to load, skipping write.")
 
