@@ -38,10 +38,19 @@ Tanpa named volume, `docker compose down` diikuti `up` menghasilkan container ba
 
 ## Known Limitations
 
-- Producer/consumer/Kafka/Postgres perlu dinyalakan manual tiap sesi baru (bukan auto-start saat boot) — hanya bagian Airflow DAG yang otomatis terjadwal.
-- `dbt test` saat ini hanya berjalan terjadwal via Airflow, belum terintegrasi ke CI GitHub Actions.
-- Belum ada integrasi cloud data warehouse (BigQuery/Snowflake) — semua masih berjalan di infrastruktur lokal (Docker).
-- Belum ada Infrastructure as Code (Terraform) — provisioning masih manual via `docker-compose.yml`.
+- Producer/consumer/Kafka/Postgres perlu dinyalakan manual tiap sesi baru (bukan auto-start saat boot) - hanya bagian Airflow DAG yang otomatis terjadwal.
+- Belum ada integrasi cloud data warehouse (BigQuery/Snowflake) atau object storage (S3/MinIO) - semua masih berjalan di infrastruktur lokal (Docker volume).
+- Belum ada Infrastructure as Code (Terraform) - provisioning masih manual via `docker-compose.yml`.
+- Producer, consumer, spark_jobs, Airflow, dan dbt berjalan native di host machine (bukan containerized), sehingga membutuhkan environment setup manual (JAVA_HOME, versi Python spesifik). Idealnya job-job ini dibungkus dalam custom Docker image agar environment-nya terisolasi dan reproducible.
+- Belum ada mekanisme compaction untuk file kecil di Bronze layer (small file problem) - dalam penggunaan jangka panjang, jumlah file parquet kecil akan terus bertambah dan berpotensi memperlambat read performance. Percobaan awal membangun compaction job menemukan race condition antara proses baca-tulis di path yang sama saat consumer streaming aktif; perlu penanganan lebih matang sebelum dipakai di production.
+
+## Idempotency (Sudah Diperbaiki)
+
+Sebelumnya, `load_to_postgres.py` dan model dbt `fact_weather_reading` menggunakan pendekatan watermark + append biasa, yang berisiko menghasilkan duplikat jika sebuah run gagal di tengah proses tulis. Ini sudah diperbaiki:
+
+- `load_to_postgres.py` sekarang menulis ke tabel staging dulu, lalu memindahkan data ke tabel target lewat `INSERT ... ON CONFLICT DO UPDATE` dalam satu transaksi atomik, berdasarkan unique constraint (`location_name`, `ingested_at`).
+- Model dbt `fact_weather_reading` menggunakan `incremental_strategy='merge'` dengan composite `unique_key` yang sama.
+- Kedua perubahan sudah diverifikasi: menjalankan proses berkali-kali dengan data yang sama tidak menghasilkan duplikat, dan baris yang sudah ada di-update di tempat (bukan diduplikasi).
 
 ## Troubleshooting yang Pernah Dihadapi
 
